@@ -27,7 +27,7 @@ def clean_for_ml(text):
     return text.strip().lower()
 
 # --------------------
-# Sentiment Analysis funqtion
+# Sentiment Analysis functions
 # --------------------
 def apply_sentiment(df, text_column = 'content_vader'):
     analyzer = SentimentIntensityAnalyzer()

@@ -7,13 +7,31 @@ import plotly.express as px
 import re
 import emoji
 import string
-
+import nltk
+nltk.download('stopwords', quiet=True)
+from collections import Counter
+from nltk.corpus import stopwords
 from google_play_scraper import app, Sort, reviews
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 # --------------------
 # Text cleaning functions
 # --------------------
+
+def clean_text(text):
+    # Set stopwords
+    english_stopwords = set(stopwords.words('english'))
+    custom_stopwords = english_stopwords.union([
+        'spotify', 'app', 'music', 'song', 'songs',
+        'listen', 'playing', 'play', 'streaming'
+    ])
+    if pd.isna(text):
+        return ''
+    text = text.lower()
+    words = re.findall(r'\b\w+\b', text)
+    words = [w for w in words if w not in custom_stopwords and len(w) >= 3]
+    return " ".join(words)
+
 def clean_for_vader(text):
     """Light cleaning for VADER sentiment analysis."""
     return re.sub(r'\s+', ' ', text).strip()
@@ -31,7 +49,9 @@ def clean_for_ml(text):
 # --------------------
 def apply_sentiment(df, text_column = 'content_vader'):
     analyzer = SentimentIntensityAnalyzer()
-    df['sentiment_score'] = df['content_vader'].apply(lambda x: analyzer.polarity_scores(x)['compound'])
+    df['sentiment_score'] = df['content_vader'].apply(
+        lambda x: analyzer.polarity_scores(x)['compound']
+    )
     df['sentiment_label'] = df['sentiment_score'].apply(
         lambda x: 'positive' if x >= 0.05 else ('negative' if x <= -0.05 else 'neutral')
     )
@@ -41,11 +61,10 @@ def apply_sentiment(df, text_column = 'content_vader'):
 # Main Data Processing
 # --------------------
 def main():
-    # Collect app reviews
+        # Collect app reviews
     continuation_token = None
     all_reviews = []
-
-    while len(all_reviews) <= 2000:  
+    while len(all_reviews) <= 10000:  
         chunk, continuation_token = reviews(
             'com.spotify.music',
             lang='en',  
@@ -54,19 +73,20 @@ def main():
             count=200, 
             filter_score_with=None 
         )
-        all_reviews.extend(chunk)  
+        all_reviews.extend(chunk)
         if continuation_token is None:
+            
             break
         
     df = pd.DataFrame(all_reviews)
     
-    # Cleaning and preprocessing
-    df = df[df['reviewCreatedVersion'].notna()] # filter out rows without version info
-    df.dropna(subset=['content'], inplace=True) 
-    df.duplicated().sum() 
-    df.duplicated(subset=['reviewId']).sum()
-    df.drop_duplicates(inplace=True)  
+    print("After removing empty content:", len(df))
     
+    # Cleaning and preprocessing
+    df = df[df['content'].notna()] # filter out rows without version info
+    # df.drop_duplicates(subset=['reviewId'], inplace=True)
+    print("After deduplication:", len(df))
+
     # Fix data types
     df['score'] = df['score'].astype(int)  
     df['thumbsUpCount'] = df['thumbsUpCount'].astype(int)
@@ -84,23 +104,15 @@ def main():
 
     sampled_df = pd.concat(strata).reset_index(drop=True)
     
-   # Sampled data
-    sampled_df.to_csv('spotify_reviews.csv', index=False)
-
     # Clean sampled data in-place
     sampled_df['content_vader'] = sampled_df['content'].apply(clean_for_vader)
     sampled_df['content_ml'] = sampled_df['content'].apply(clean_for_ml)
-
-    # Optional: Save only cleaned text if needed separately
+    sampled_df['cleaned_content'] = sampled_df['content'].apply(clean_text)
     sampled_df.to_csv('spotify_reviews_cleaned.csv', index=False)
 
     # Apply sentiment on the cleaned vader column
     sampled_df = apply_sentiment(sampled_df, 'content_vader')
-
-    # Save full version with sentiment + all metadata
     sampled_df.to_csv('spotify_reviews_sentiment.csv', index=False)
-    
-
 # run script
 if __name__ == "__main__":
     main()
